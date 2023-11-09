@@ -1,8 +1,9 @@
 import React from "react";
-import { makeStyles, shorthands } from "@griffel/react";
+import { makeStyles, mergeClasses, shorthands } from "@griffel/react";
 import { IMessage } from "./types";
 import loadingIcon from './logo.svg';
 import axios from "axios";
+import { getPrompt } from "./openaiAPI";
 
 const useStyles = makeStyles({
   root: {
@@ -100,6 +101,21 @@ const useStyles = makeStyles({
     animationDuration: "3s",
     animationIterationCount: "infinite",
     animationTimingFunction: "linear",
+  },
+  messageOptions: {
+    marginTop: "8px"
+  },
+  option: {
+    display: "flex",
+    marginTop:"8px",
+    columnGap: "8px"
+  },
+  sendButtonTiny: {
+    height: "24px",
+    width: "24px",
+    flexShrink: 0,
+    ...shorthands.padding("4px"),
+    backgroundColor: "#663f2a"
   }
 });
 
@@ -107,34 +123,77 @@ export const ChatApp = () => {
   const classNames = useStyles();
   const [text, setText] = React.useState<string>("");
   const [messages, setMessages] = React.useState<IMessage[]>([{
-    content: "Hello, I'm your midjourney bot. How can I help you?",
-    source: "bot"
+    content: "Hello, I'm your image bot. How can I help you?",
+    source: "openai-bot"
   }]);
   const [loading, setLoading] = React.useState<boolean>(false);
+  const messageListRef = React.useRef<HTMLDivElement>(null)
+
+  const scrollMessageToBottom = React.useCallback(() => {
+    messageListRef.current?.scrollTo({top: messageListRef.current?.scrollHeight, behavior: "smooth"})
+  }, [])
 
   const onSend = React.useCallback(async () => {
     setMessages(prevMessages => [...prevMessages, {content: text, source: "user"}]);
+    scrollMessageToBottom();
     setText("");
     setLoading(true);
     try {
-      const response = await axios.post("/api/imagine", {prompt: text});
-      const imageUrl = response.data;
-      setMessages(prevMessages => [...prevMessages, {content: "", imageUrl, source: "bot"}]);
+      const prompts = await getPrompt(text);
+      if (!prompts || prompts.length === 0) {
+        setMessages(prevMessages => [...prevMessages, {content: "Can not get any useful information for image generation from giving content.", source: "openai-bot"}]);
+        scrollMessageToBottom();
+      } else {
+        setMessages(prevMessages => [...prevMessages, {content: "Please choose an option that is match your imagination to generate a picture.", source: "openai-bot", options: prompts}]);
+        scrollMessageToBottom();
+      }
     } finally {
       setLoading(false);
     }
   }, [text]);
 
+  const onDraw = React.useCallback(async (imagePrompt: string) => {
+    setMessages(prevMessages => [...prevMessages, {content: imagePrompt, source: "user"}]);
+    scrollMessageToBottom();
+    setLoading(true);
+    try {
+      const response = await axios.post("/api/imagine", {prompt: imagePrompt});
+      const imageUrl = response.data;
+      setMessages(prevMessages => [...prevMessages, {content: "", imageUrl, source: "midjourney-bot"}]);
+      scrollMessageToBottom();
+    } finally {
+      setLoading(false);
+    }
+  }, [scrollMessageToBottom]);
+
   return <div className={classNames.root}>
-    <div className={classNames.messageList}>{
+    <div ref={messageListRef} className={classNames.messageList}>{
       messages.map((message, index) => {
-        return <div className={message.source === "user" ? classNames.userMessageWrapper : classNames.botMessageWrapper}><div
-          key={index}
-          className={message.source === "user" ? classNames.userMessage : classNames.botMessage}
-        >
-          <div>{message.content}</div>
-          {message.imageUrl && <div><img alt="image" className={classNames.image} src={message.imageUrl}/></div>}
-        </div></div>;
+        return <div
+          className={message.source === "user" ? classNames.userMessageWrapper : classNames.botMessageWrapper}>
+          <div
+            key={index}
+            className={message.source === "user" ? classNames.userMessage : classNames.botMessage}
+          >
+            <div>{message.content}</div>
+            {message.imageUrl && (
+              <div>
+                <img alt="from-mid-journey" className={classNames.image} src={message.imageUrl}/>
+              </div>
+            )}
+            {message.options && message.options.length && <div className={classNames.messageOptions}>{message.options.map((option, index) => {
+              return <div key={index} className={classNames.option}>
+                <button className={mergeClasses(classNames.sendButton, classNames.sendButtonTiny)} onClick={() => {onDraw(option)}} disabled={loading}>
+                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#fff">
+                    <path
+                      d="M12.8147 12.1969L5.28344 13.4521C5.10705 13.4815 4.95979 13.6029 4.89723 13.7704L2.29933 20.7278C2.05066 21.3673 2.72008 21.9773 3.33375 21.6705L21.3337 12.6705C21.8865 12.3941 21.8865 11.6052 21.3337 11.3288L3.33375 2.32885C2.72008 2.02201 2.05066 2.63206 2.29933 3.2715L4.89723 10.2289C4.95979 10.3964 5.10705 10.5178 5.28344 10.5472L12.8147 11.8024C12.9236 11.8205 12.9972 11.9236 12.9791 12.0325C12.965 12.1168 12.899 12.1829 12.8147 12.1969Z"></path>
+                  </svg>
+                </button>
+                <div>{option}</div>
+              </div>
+            })}</div>}
+          </div>
+        </div>;
       })
     }</div>
     <div>
